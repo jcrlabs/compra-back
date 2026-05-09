@@ -1,0 +1,35 @@
+replicaCount: 1
+
+image:
+  tag: develop-0000000
+  pullPolicy: Always
+
+ingress:
+  host: compra-api-test.jcrlabs.net
+
+config:
+  env: staging
+  corsAllowedOrigins: "https://compra-test.jcrlabs.net,http://localhost:5173"
+  scraperCron: "0 4 * * *"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+postgres:
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+hpa:
+  minReplicas: 1
+  maxReplicas: 2

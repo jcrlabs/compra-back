@@ -1,0 +1,42 @@
+name: CD
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+  packages: write
+env:
+  REGISTRY: ghcr.io/jcrlabs
+  IMAGE: compra-back
+jobs:
+  deploy-prod:
+    name: Deploy → prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set version from tag
+        run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push (${{ env.VERSION }})
+        run: |
+          docker build -t $REGISTRY/$IMAGE:$VERSION .
+          docker push $REGISTRY/$IMAGE:$VERSION
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-branch
+      - name: Update values-prod.yaml
+        working-directory: main-branch
+        run: |
+          sed -i "s/tag: .*/tag: $VERSION/" deploy/helm/values-prod.yaml
+          git config user.email "ci@jcrlabs.net"
+          git config user.name "CI Bot"
+          git add deploy/helm/values-prod.yaml
+          git diff --staged --quiet || git commit -m "chore: release $VERSION"
+          git push

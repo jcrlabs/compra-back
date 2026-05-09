@@ -54,10 +54,11 @@ func (r *CatalogRepository) GetCategory(id uuid.UUID) (*models.Category, error) 
 // Products
 
 type ProductFilter struct {
-	Search     string
-	CategoryID *uuid.UUID
-	Page       int
-	Limit      int
+	Search      string
+	CategoryID  *uuid.UUID
+	Supermarket string
+	Page        int
+	Limit       int
 }
 
 type ProductPage struct {
@@ -88,6 +89,11 @@ func (r *CatalogRepository) ListProducts(f ProductFilter) (*ProductPage, error) 
 	if f.CategoryID != nil {
 		where = append(where, fmt.Sprintf("p.category_id=$%d", i))
 		args = append(args, *f.CategoryID)
+		i++
+	}
+	if f.Supermarket != "" {
+		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM current_prices cp WHERE cp.product_id=p.id AND cp.supermarket=$%d)", i))
+		args = append(args, f.Supermarket)
 		i++
 	}
 

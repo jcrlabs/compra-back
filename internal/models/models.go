@@ -142,6 +142,20 @@ type OptimizedItem struct {
 	ExternalURL string      `json:"external_url,omitempty"`
 }
 
+// Offer — product with a price drop vs 30-day average
+type Offer struct {
+	ProductID    uuid.UUID   `json:"product_id"`
+	Name         string      `json:"name"`
+	Brand        string      `json:"brand,omitempty"`
+	ImageURL     string      `json:"image_url,omitempty"`
+	Unit         string      `json:"unit"`
+	UnitQuantity float64     `json:"unit_quantity"`
+	Supermarket  Supermarket `json:"supermarket"`
+	CurrentPrice float64     `json:"current_price"`
+	AvgPrice     float64     `json:"avg_price"`
+	DiscountPct  float64     `json:"discount_pct"`
+}
+
 // UserSupermarketPrefs
 
 type UserSupermarketPrefs struct {

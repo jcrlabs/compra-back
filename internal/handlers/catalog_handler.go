@@ -35,6 +35,9 @@ func (h *CatalogHandler) ListProducts(c *gin.Context) {
 			filter.CategoryID = &id
 		}
 	}
+	if s := c.Query("supermarket"); s != "" {
+		filter.Supermarket = s
+	}
 
 	if p := c.DefaultQuery("page", "1"); p != "" {
 		if _, err := parseInt(p, &filter.Page); err != nil || filter.Page < 1 {

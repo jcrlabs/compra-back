@@ -84,6 +84,18 @@ func (h *PricingHandler) GetCheapest(c *gin.Context) {
 	c.JSON(http.StatusOK, bestPrices)
 }
 
+func (h *PricingHandler) GetOffers(c *gin.Context) {
+	offers, err := h.priceRepo.GetOffers(50)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get offers"})
+		return
+	}
+	if offers == nil {
+		offers = []models.Offer{}
+	}
+	c.JSON(http.StatusOK, offers)
+}
+
 func (h *PricingHandler) GetUserPrefs(c *gin.Context) {
 	userID, ok := middleware.GetUserID(c)
 	if !ok {

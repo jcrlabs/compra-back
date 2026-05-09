@@ -133,6 +133,52 @@ func (r *PricingRepository) GetBestPrices(productIDs []uuid.UUID, supers []model
 	return result, nil
 }
 
+func (r *PricingRepository) GetOffers(limit int) ([]models.Offer, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.Query(context.Background(),
+		`SELECT p.id, p.name, COALESCE(p.brand,''), COALESCE(p.image_url,''),
+		        p.unit, p.unit_quantity,
+		        cp.supermarket, cp.price,
+		        COALESCE(avg_h.avg_price, cp.price),
+		        CASE WHEN avg_h.avg_price IS NOT NULL AND avg_h.avg_price > 0
+		             THEN ROUND(((avg_h.avg_price - cp.price) / avg_h.avg_price * 100)::numeric, 1)
+		             ELSE 0 END
+		 FROM products p
+		 JOIN current_prices cp ON cp.product_id = p.id
+		 LEFT JOIN (
+		     SELECT product_id, supermarket, AVG(price) as avg_price
+		     FROM prices
+		     WHERE scraped_at > NOW() - INTERVAL '30 days'
+		     GROUP BY product_id, supermarket
+		     HAVING COUNT(*) >= 2
+		 ) avg_h ON avg_h.product_id = p.id AND avg_h.supermarket = cp.supermarket
+		 ORDER BY
+		     CASE WHEN avg_h.avg_price IS NOT NULL AND avg_h.avg_price > 0
+		          THEN (avg_h.avg_price - cp.price) / avg_h.avg_price
+		          ELSE 0 END DESC,
+		     cp.price ASC
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var offers []models.Offer
+	for rows.Next() {
+		var o models.Offer
+		var superStr string
+		if err := rows.Scan(&o.ProductID, &o.Name, &o.Brand, &o.ImageURL,
+			&o.Unit, &o.UnitQuantity, &superStr, &o.CurrentPrice, &o.AvgPrice, &o.DiscountPct); err != nil {
+			return nil, err
+		}
+		o.Supermarket = models.Supermarket(superStr)
+		offers = append(offers, o)
+	}
+	return offers, nil
+}
+
 func scanPrices(rows interface {
 	Next() bool
 	Scan(...any) error

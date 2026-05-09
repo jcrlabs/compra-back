@@ -121,6 +121,7 @@ func main() {
 		auth.GET("/products/:id/prices", pricingHandler.GetPrices)
 		auth.GET("/products/:id/prices/history", pricingHandler.GetPriceHistory)
 		auth.GET("/cheapest", pricingHandler.GetCheapest)
+		auth.GET("/offers", pricingHandler.GetOffers)
 		auth.GET("/preferences/supermarkets", pricingHandler.GetUserPrefs)
 		auth.PUT("/preferences/supermarkets", pricingHandler.SetUserPrefs)
 

@@ -36,12 +36,6 @@ func (h *CatalogHandler) ListProducts(c *gin.Context) {
 		}
 	}
 
-	var page, limit int
-	c.ShouldBindQuery(&struct {
-		Page  int `form:"page"`
-		Limit int `form:"limit"`
-	}{Page: page, Limit: limit})
-
 	if p := c.DefaultQuery("page", "1"); p != "" {
 		if _, err := parseInt(p, &filter.Page); err != nil || filter.Page < 1 {
 			filter.Page = 1
@@ -76,14 +70,11 @@ func (h *CatalogHandler) GetProduct(c *gin.Context) {
 }
 
 func parseInt(s string, dest *int) (int, error) {
-	var v int
-	_, err := (&gin.Context{}).ShouldBindQuery(nil)
-	_ = err
 	n, e := parseIntRaw(s)
 	if e == nil {
 		*dest = n
 	}
-	return v, e
+	return n, e
 }
 
 func parseIntRaw(s string) (int, error) {

@@ -9,7 +9,6 @@ import (
 	"github.com/jcrlabs/compra-back/internal/middleware"
 	"github.com/jcrlabs/compra-back/internal/models"
 	"github.com/jcrlabs/compra-back/internal/repository"
-	"github.com/jcrlabs/compra-back/internal/services"
 )
 
 type PricingHandler struct {

@@ -76,7 +76,6 @@ var eroskiSearchTerms = []struct {
 
 var (
 	eroskiProductRe = regexp.MustCompile(`/productdetail/(\d+)-([^/"]+)/`)
-	eroskiNameRe    = regexp.MustCompile(`item_name&quot;:&quot;([^&]+)&quot;`)
 	eroskiPriceRe   = regexp.MustCompile(`item_name&quot;:&quot;([^&]+)&quot;[^}]*?price&quot;:(\d+(?:\.\d+)?)`)
 	eroskiImageRe   = regexp.MustCompile(`data-big-images="\[https://supermercado\.eroski\.es//images/(\d+)_[^"]+\.jpg`)
 )

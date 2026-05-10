@@ -63,10 +63,10 @@ type mercadonaSubcatResp struct {
 		ID       int    `json:"id"`
 		Name     string `json:"name"`
 		Products []struct {
-			ID          string `json:"id"`
-			Slug        string `json:"slug"`
-			DisplayName string `json:"display_name"`
-			Thumbnail   string `json:"thumbnail"`
+			ID                string `json:"id"`
+			Slug              string `json:"slug"`
+			DisplayName       string `json:"display_name"`
+			Thumbnail         string `json:"thumbnail"`
 			PriceInstructions struct {
 				UnitPrice    flexFloat `json:"unit_price"`
 				SizeFormat   string    `json:"size_format"`

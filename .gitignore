@@ -26,7 +26,15 @@ go.work.sum
 
 # env file
 .env
+.keys/
+*.pem
+*.key
+
+# Build artifacts
+bin/
+/server
 
 # Editor/IDE
 # .idea/
 # .vscode/
+.gstack/

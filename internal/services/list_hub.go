@@ -12,7 +12,7 @@ import (
 // When any list mutation occurs, Broadcast notifies all open connections.
 
 type ListEvent struct {
-	Type    string `json:"type"`    // "item_added", "item_updated", "item_deleted", "list_updated"
+	Type    string `json:"type"` // "item_added", "item_updated", "item_deleted", "list_updated"
 	ListID  string `json:"list_id"`
 	Payload any    `json:"payload,omitempty"`
 }

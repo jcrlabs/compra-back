@@ -28,18 +28,18 @@ func (s *CarrefourScraper) Name() string { return "carrefour" }
 
 // carrefourCategories maps category slug → display name for the main grocery sections.
 var carrefourCategories = map[string]string{
-	"lacteos-huevos":    "Lácteos y huevos",
-	"frutas-verduras":   "Frutas y verduras",
-	"carniceria":        "Carnicería",
-	"pescaderia":        "Pescadería",
-	"pan-bolleria":      "Pan y bollería",
-	"congelados":        "Congelados",
-	"bebidas":           "Bebidas",
-	"aceite-conservas":  "Aceite y conservas",
-	"drogueria":         "Droguería",
-	"higiene-salud":     "Higiene y salud",
-	"mascotas":          "Mascotas",
-	"cafe-desayuno":     "Café y desayuno",
+	"lacteos-huevos":   "Lácteos y huevos",
+	"frutas-verduras":  "Frutas y verduras",
+	"carniceria":       "Carnicería",
+	"pescaderia":       "Pescadería",
+	"pan-bolleria":     "Pan y bollería",
+	"congelados":       "Congelados",
+	"bebidas":          "Bebidas",
+	"aceite-conservas": "Aceite y conservas",
+	"drogueria":        "Droguería",
+	"higiene-salud":    "Higiene y salud",
+	"mascotas":         "Mascotas",
+	"cafe-desayuno":    "Café y desayuno",
 }
 
 func (s *CarrefourScraper) setHeaders(req *http.Request) {

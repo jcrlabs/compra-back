@@ -13,8 +13,8 @@ import (
 
 // Ingester persists scraped products and prices.
 type Ingester struct {
-	catalog  *repository.CatalogRepository
-	pricing  *repository.PricingRepository
+	catalog *repository.CatalogRepository
+	pricing *repository.PricingRepository
 }
 
 func NewIngester(catalog *repository.CatalogRepository, pricing *repository.PricingRepository) *Ingester {

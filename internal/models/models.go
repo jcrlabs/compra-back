@@ -95,14 +95,14 @@ type BestPrice struct {
 // ShoppingList
 
 type ShoppingList struct {
-	ID         uuid.UUID `json:"id"`
-	OwnerID    uuid.UUID `json:"owner_id"`
-	Name       string    `json:"name"`
-	ShareToken uuid.UUID `json:"share_token"`
-	Members    []User    `json:"members,omitempty"`
+	ID         uuid.UUID  `json:"id"`
+	OwnerID    uuid.UUID  `json:"owner_id"`
+	Name       string     `json:"name"`
+	ShareToken uuid.UUID  `json:"share_token"`
+	Members    []User     `json:"members,omitempty"`
 	Items      []ListItem `json:"items,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type ListItem struct {
@@ -122,11 +122,11 @@ type ListItem struct {
 
 // OptimizedList — shopping list with best-price breakdown per supermarket
 type OptimizedList struct {
-	TotalBestPrice float64                     `json:"total_best_price"`
-	TotalSingle    float64                     `json:"total_single_super"`
-	SavedAmount    float64                     `json:"saved_amount"`
-	Groups         map[Supermarket]SuperGroup  `json:"groups"`
-	Uncovered      []ListItem                  `json:"uncovered"` // items with no price found
+	TotalBestPrice float64                    `json:"total_best_price"`
+	TotalSingle    float64                    `json:"total_single_super"`
+	SavedAmount    float64                    `json:"saved_amount"`
+	Groups         map[Supermarket]SuperGroup `json:"groups"`
+	Uncovered      []ListItem                 `json:"uncovered"` // items with no price found
 }
 
 type SuperGroup struct {
@@ -159,6 +159,6 @@ type Offer struct {
 // UserSupermarketPrefs
 
 type UserSupermarketPrefs struct {
-	UserID       uuid.UUID              `json:"user_id"`
-	Supermarkets map[Supermarket]bool   `json:"supermarkets"`
+	UserID       uuid.UUID            `json:"user_id"`
+	Supermarkets map[Supermarket]bool `json:"supermarkets"`
 }

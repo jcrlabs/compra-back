@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  tag: v0.1.3
+  tag: v0.1.5
 
 ingress:
   host: compra-api.jcrlabs.net

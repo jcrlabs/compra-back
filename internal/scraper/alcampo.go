@@ -2,59 +2,89 @@ package scraper
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
-// AlcampoScraper uses go-rod to navigate Alcampo's hybris-based SPA.
-// Requires a Spanish IP to reach www.alcampo.es.
+// AlcampoScraper uses the compraonline.alcampo.es REST API (webproductpagews v6).
+// No browser required — categories are fetched via paginated JSON API.
+//
+// API: GET https://www.compraonline.alcampo.es/api/webproductpagews/v6/product-pages
+//   ?category={uuid}&tag=web&tag=category-item&maxPageSize=100&maxProductsToDecorate=100&imageFormats=medium
 
 type AlcampoScraper struct {
 	userAgent string
+	client    *http.Client
 }
 
 func NewAlcampoScraper(userAgent string) *AlcampoScraper {
-	return &AlcampoScraper{userAgent: userAgent}
+	return &AlcampoScraper{
+		userAgent: userAgent,
+		client:    &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 func (s *AlcampoScraper) Name() string { return "alcampo" }
 
-var alcampoCategories = []struct {
+// alcampoCategories: top-level food categories from compraonline.alcampo.es initial state (2026-05).
+var alcampoFoodCategories = []struct {
 	Name string
-	URL  string
+	UUID string
 }{
-	{"Lácteos y huevos", "https://www.alcampo.es/compra-online/alimentacion/lacteos-y-huevos/"},
-	{"Charcutería y quesos", "https://www.alcampo.es/compra-online/alimentacion/charcuteria-y-quesos/"},
-	{"Frutas y verduras", "https://www.alcampo.es/compra-online/alimentacion/frutas-y-verduras/"},
-	{"Carnes y aves", "https://www.alcampo.es/compra-online/alimentacion/carnes-y-aves/"},
-	{"Pescado y marisco", "https://www.alcampo.es/compra-online/alimentacion/pescado-y-marisco/"},
-	{"Pan y bollería", "https://www.alcampo.es/compra-online/alimentacion/panaderia/"},
-	{"Aceite y condimentos", "https://www.alcampo.es/compra-online/alimentacion/aceite-y-condimentos/"},
-	{"Pasta y arroz", "https://www.alcampo.es/compra-online/alimentacion/pasta-arroz-y-legumbres/"},
-	{"Bebidas", "https://www.alcampo.es/compra-online/alimentacion/bebidas/"},
-	{"Congelados", "https://www.alcampo.es/compra-online/alimentacion/congelados/"},
+	{"Frescos", "fe16f111-2da2-4c24-9bad-56b10b28b87a"},
+	{"Leche, Huevos y Lácteos", "e33fcb5b-8a16-4202-b88b-13d7dfc547ce"},
+	{"Alimentación", "dc4ac5ed-f53e-4f6d-b2fd-8de2aa8e723c"},
+	{"Bebidas", "d01a3417-5a84-4135-8d0c-a368cfd581a8"},
+	{"Congelados", "ab82727b-0a66-4fac-bff6-d9864ecd9dbc"},
+	{"Desayuno y Merienda", "d611a12e-a365-4ec5-9f0f-d2baf03e1f69"},
+	{"Comida Preparada", "78da9a99-800a-4cbe-91c7-d77378efc4b8"},
+}
+
+const alcampoAPIBase = "https://www.compraonline.alcampo.es"
+
+type alcampoAPIResponse struct {
+	ProductGroups []struct {
+		DecoratedProducts []alcampoProduct `json:"decoratedProducts"`
+	} `json:"productGroups"`
+	Metadata struct {
+		NextPageToken string `json:"nextPageToken"`
+	} `json:"metadata"`
+}
+
+type alcampoProduct struct {
+	ProductID  string `json:"productId"`
+	RetailerID string `json:"retailerProductId"`
+	Name       string `json:"name"`
+	PackSize   string `json:"packSizeDescription"`
+	Available  bool   `json:"available"`
+	Price      struct {
+		Amount string `json:"amount"`
+	} `json:"price"`
+	Image struct {
+		Src string `json:"src"`
+	} `json:"image"`
+	CategoryPath []string `json:"categoryPath"`
 }
 
 func (s *AlcampoScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
-	browser := getBrowser()
 	var products []RawProduct
 
-	for _, cat := range alcampoCategories {
+	for _, cat := range alcampoFoodCategories {
 		select {
 		case <-ctx.Done():
 			return products, nil
 		default:
 		}
 
-		catProducts, err := scrapeAlcampoCategory(ctx, browser, cat.Name, cat.URL)
+		catProducts, err := s.scrapeCategory(ctx, cat.UUID, cat.Name)
 		if err != nil {
-			slog.Warn("alcampo: category failed", slog.String("cat", cat.Name), slog.String("error", err.Error()))
+			slog.Warn("alcampo: category failed", slog.String("cat", cat.Name), slog.String("err", err.Error()))
 			continue
 		}
 		products = append(products, catProducts...)
@@ -62,113 +92,114 @@ func (s *AlcampoScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	}
 
 	if len(products) == 0 {
-		slog.Warn("alcampo: no products found — site may be unreachable from non-ES IPs")
+		slog.Warn("alcampo: no products extracted")
 	} else {
 		slog.Info("alcampo: scrape complete", slog.Int("products", len(products)))
 	}
 	return products, nil
 }
 
-func scrapeAlcampoCategory(ctx context.Context, browser *rod.Browser, catName, url string) ([]RawProduct, error) {
-	page, err := browser.Page(proto.TargetCreateTarget{URL: url})
-	if err != nil {
-		return nil, fmt.Errorf("open page: %w", err)
-	}
-	defer func() { _ = page.Close() }()
+func (s *AlcampoScraper) scrapeCategory(ctx context.Context, uuid, catName string) ([]RawProduct, error) {
+	var products []RawProduct
+	pageToken := ""
+	maxPages := 20
 
-	page = page.Context(ctx)
+	for page := 0; page < maxPages; page++ {
+		select {
+		case <-ctx.Done():
+			return products, nil
+		default:
+		}
 
-	if err := page.WaitLoad(); err != nil {
-		slog.Warn("alcampo: WaitLoad failed", slog.String("url", url))
-	}
-	time.Sleep(3 * time.Second)
+		url := fmt.Sprintf(
+			"%s/api/webproductpagews/v6/product-pages?category=%s&tag=web&tag=category-item&maxPageSize=100&maxProductsToDecorate=100&imageFormats=medium",
+			alcampoAPIBase, uuid,
+		)
+		if pageToken != "" {
+			url += "&pageToken=" + pageToken
+		}
 
-	selectors := []string{
-		".product-item",
-		".product-card",
-		"[data-component-id='product']",
-		"li.product",
-		"article.product",
-	}
+		resp, err := s.doRequest(ctx, url)
+		if err != nil {
+			return products, fmt.Errorf("page %d: %w", page, err)
+		}
 
-	var els rod.Elements
-	for _, sel := range selectors {
-		els, err = page.Elements(sel)
-		if err == nil && len(els) > 0 {
+		for _, g := range resp.ProductGroups {
+			for _, p := range g.DecoratedProducts {
+				if !p.Available || p.Name == "" {
+					continue
+				}
+				raw := s.toRawProduct(p, catName)
+				if raw.Price > 0 {
+					products = append(products, raw)
+				}
+			}
+		}
+
+		pageToken = resp.Metadata.NextPageToken
+		if pageToken == "" {
 			break
 		}
-	}
-
-	if len(els) == 0 {
-		return nil, fmt.Errorf("no product elements on %s", url)
-	}
-
-	var products []RawProduct
-	for _, el := range els {
-		p := extractAlcampoProduct(el, catName)
-		if p.Name == "" {
-			continue
-		}
-		products = append(products, p)
+		time.Sleep(300 * time.Millisecond)
 	}
 	return products, nil
 }
 
-func extractAlcampoProduct(el *rod.Element, catName string) RawProduct {
-	var p RawProduct
-	p.Category = catName
+func (s *AlcampoScraper) doRequest(ctx context.Context, url string) (*alcampoAPIResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", s.userAgent)
+	req.Header.Set("Referer", alcampoAPIBase+"/")
 
-	nameSelectors := []string{".product-item__name", ".product-name", "h3", "h2", ".name"}
-	for _, sel := range nameSelectors {
-		if nameEl, err := el.Element(sel); err == nil {
-			if t, err := nameEl.Text(); err == nil && t != "" {
-				p.Name = strings.TrimSpace(t)
-				break
-			}
-		}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	priceSelectors := []string{".product-item__price", ".price", ".product-price", "[class*='price']"}
-	for _, sel := range priceSelectors {
-		if priceEl, err := el.Element(sel); err == nil {
-			if t, err := priceEl.Text(); err == nil && t != "" {
-				p.Price = parseAlcampoPrice(t)
-				break
-			}
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	if imgEl, err := el.Element("img"); err == nil {
-		if src, err := imgEl.Attribute("src"); err == nil && src != nil {
-			p.ImageURL = *src
-		}
+	var result alcampoAPIResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("json: %w", err)
 	}
-
-	if aEl, err := el.Element("a"); err == nil {
-		if href, err := aEl.Attribute("href"); err == nil && href != nil {
-			if strings.HasPrefix(*href, "http") {
-				p.ProductURL = *href
-			} else {
-				p.ProductURL = "https://www.alcampo.es" + *href
-			}
-		}
-	}
-
-	p.Unit = "unidad"
-	p.UnitQuantity = 1
-
-	return p
+	return &result, nil
 }
 
-func parseAlcampoPrice(s string) float64 {
-	s = strings.ReplaceAll(s, "€", "")
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, ",", ".")
-	s = strings.TrimSpace(s)
-	fields := strings.Fields(s)
-	if len(fields) > 0 {
-		s = fields[0]
+func (s *AlcampoScraper) toRawProduct(p alcampoProduct, catName string) RawProduct {
+	price, _ := strconv.ParseFloat(p.Price.Amount, 64)
+
+	unit, qty := ParseUnit(p.PackSize)
+	if unit == "" {
+		unit = "unidad"
+		qty = 1
 	}
-	v, _ := strconv.ParseFloat(s, 64)
-	return v
+
+	// Use the deepest available category from the product's path
+	category := catName
+	if len(p.CategoryPath) > 0 {
+		category = p.CategoryPath[0]
+	}
+
+	productURL := alcampoAPIBase + "/p/" + p.ProductID
+
+	return RawProduct{
+		Name:         strings.TrimSpace(p.Name),
+		Price:        price,
+		Unit:         unit,
+		UnitQuantity: qty,
+		ImageURL:     p.Image.Src,
+		ProductURL:   productURL,
+		Category:     category,
+	}
 }

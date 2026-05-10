@@ -3,200 +3,227 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
-// EroskiScraper uses go-rod to navigate supermercado.eroski.es,
-// complete the store-selection flow, and then scrape category pages.
+// EroskiScraper fetches products from supermercado.eroski.es using HTTP + HTML parsing.
+// The site uses Apache Tapestry (server-rendered HTML) with GA4 ecommerce data embedded.
+// Store 157 (Bilbondo, Bilbao) is used as a reliable reference store.
 
 type EroskiScraper struct {
-	userAgent string
+	client *http.Client
 }
 
-func NewEroskiScraper(userAgent string) *EroskiScraper {
-	return &EroskiScraper{userAgent: userAgent}
+func NewEroskiScraper(_ string) *EroskiScraper {
+	return &EroskiScraper{
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
 }
 
 func (s *EroskiScraper) Name() string { return "eroski" }
 
-var eroskiCategories = []struct {
-	Name string
-	Path string
-}{
-	{"Lácteos y huevos", "/es/alimentacion/lacteos-huevos-mantequilla/"},
-	{"Charcutería y quesos", "/es/alimentacion/charcuteria-y-quesos/"},
-	{"Frutas y verduras", "/es/alimentacion/frutas-y-verduras/"},
-	{"Carnes y aves", "/es/alimentacion/carne-y-aves/"},
-	{"Pescado y marisco", "/es/alimentacion/pescado-y-marisco/"},
-	{"Pan y bollería", "/es/alimentacion/pan-bolleria-pasteleria/"},
-	{"Aceite y conservas", "/es/alimentacion/aceite-vinagre-condimentos-y-conservas/"},
-	{"Pasta y arroz", "/es/alimentacion/pasta-arroz-y-legumbres/"},
-	{"Bebidas", "/es/alimentacion/bebidas/"},
-	{"Congelados", "/es/alimentacion/congelados/"},
-}
-
 const eroskiBase = "https://supermercado.eroski.es"
 
+// eroskiCookies sets a known working store (Bilbondo, shop=157).
+const eroskiCookies = "supermarket.locale=es; supermarket.direct_access=true; supermarket.ali.site=eroski; supermarket.ali.shop=157"
+
+// Search terms to cover main product categories.
+var eroskiSearchTerms = []struct {
+	category string
+	query    string
+}{
+	{"Lácteos", "leche"},
+	{"Lácteos", "yogur"},
+	{"Lácteos", "queso"},
+	{"Lácteos", "mantequilla"},
+	{"Huevos", "huevos"},
+	{"Charcutería", "jamon"},
+	{"Charcutería", "embutido"},
+	{"Carne", "pollo"},
+	{"Carne", "ternera"},
+	{"Carne", "cerdo"},
+	{"Pescado", "salmon"},
+	{"Pescado", "merluza"},
+	{"Pescado", "atun"},
+	{"Pan", "pan"},
+	{"Bollería", "galletas"},
+	{"Bollería", "cereales"},
+	{"Aceite", "aceite"},
+	{"Conservas", "conservas"},
+	{"Pasta", "pasta"},
+	{"Pasta", "arroz"},
+	{"Legumbres", "legumbres"},
+	{"Bebidas", "agua"},
+	{"Bebidas", "refresco"},
+	{"Bebidas", "cerveza"},
+	{"Bebidas", "vino"},
+	{"Bebidas", "zumo"},
+	{"Congelados", "congelado"},
+	{"Congelados", "pizza"},
+	{"Higiene", "champu"},
+	{"Higiene", "gel"},
+	{"Limpieza", "detergente"},
+	{"Limpieza", "suavizante"},
+}
+
+var (
+	eroskiProductRe = regexp.MustCompile(`/productdetail/(\d+)-([^/"]+)/`)
+	eroskiNameRe    = regexp.MustCompile(`item_name&quot;:&quot;([^&]+)&quot;`)
+	eroskiPriceRe   = regexp.MustCompile(`item_name&quot;:&quot;([^&]+)&quot;[^}]*?price&quot;:(\d+(?:\.\d+)?)`)
+	eroskiImageRe   = regexp.MustCompile(`data-big-images="\[https://supermercado\.eroski\.es//images/(\d+)_[^"]+\.jpg`)
+)
+
 func (s *EroskiScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
-	browser := getBrowser()
+	slog.Info("eroski: starting scrape")
 
-	// Step 1: open homepage and complete store selection if prompted.
-	home, err := browser.Page(proto.TargetCreateTarget{URL: eroskiBase + "/"})
-	if err != nil {
-		return nil, fmt.Errorf("eroski: open home: %w", err)
-	}
-	home = home.Context(ctx)
-	if err := home.WaitLoad(); err != nil {
-		slog.Warn("eroski: home WaitLoad failed", slog.String("error", err.Error()))
-	}
-	time.Sleep(2 * time.Second)
-
-	// Try to dismiss store-selection modal by clicking first available store or CP input.
-	_ = rod.Try(func() {
-		// Try postal code input.
-		el := home.MustElement(`input[name*="postal"], input[placeholder*="código postal"], input[placeholder*="CP"]`)
-		el.MustInput("48001") // Bilbao — Eroski HQ region.
-		el.MustType('\r')
-		time.Sleep(2 * time.Second)
-	})
-
-	_ = rod.Try(func() {
-		// Alternatively click the first store button.
-		btn := home.MustElement(`button.store-selector, button[data-testid*="store"], .store-list button, .tienda button`)
-		btn.MustClick()
-		time.Sleep(2 * time.Second)
-	})
-
-	_ = home.Close()
-
+	seen := make(map[string]bool) // deduplicate by product ID
 	var products []RawProduct
 
-	for _, cat := range eroskiCategories {
+	for _, term := range eroskiSearchTerms {
+		if ctx.Err() != nil {
+			break
+		}
+
+		termProducts, err := s.scrapeSearchTerm(ctx, term.category, term.query, seen)
+		if err != nil {
+			slog.Warn("eroski: search failed", slog.String("q", term.query), slog.String("error", err.Error()))
+			continue
+		}
+		products = append(products, termProducts...)
+		slog.Info("eroski: term scraped", slog.String("q", term.query), slog.Int("new", len(termProducts)))
+
+		select {
+		case <-ctx.Done():
+			goto done
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+done:
+	slog.Info("eroski: scrape complete", slog.Int("products", len(products)))
+	return products, nil
+}
+
+func (s *EroskiScraper) scrapeSearchTerm(ctx context.Context, category, query string, seen map[string]bool) ([]RawProduct, error) {
+	var products []RawProduct
+
+	for page := 0; page < 10; page++ {
+		if ctx.Err() != nil {
+			break
+		}
+
+		url := fmt.Sprintf("%s/es/search/results/?q=%s&numberResultsPerPage=40&currentPage=%d", eroskiBase, query, page)
+		html, err := s.fetchHTML(ctx, url)
+		if err != nil {
+			return products, err
+		}
+
+		pageProducts := extractEroskiProducts(html, category, seen)
+		if len(pageProducts) == 0 {
+			break // no more results
+		}
+		products = append(products, pageProducts...)
+
+		// If fewer than 40 results, this was the last page.
+		if len(pageProducts) < 40 {
+			break
+		}
+
 		select {
 		case <-ctx.Done():
 			return products, nil
-		default:
+		case <-time.After(200 * time.Millisecond):
 		}
-
-		catURL := eroskiBase + cat.Path
-		catProducts, err := scrapeEroskiCategory(ctx, browser, cat.Name, catURL)
-		if err != nil {
-			slog.Warn("eroski: category failed", slog.String("cat", cat.Name), slog.String("error", err.Error()))
-			continue
-		}
-		products = append(products, catProducts...)
-		slog.Info("eroski: category scraped", slog.String("cat", cat.Name), slog.Int("count", len(catProducts)))
 	}
 
-	if len(products) == 0 {
-		slog.Warn("eroski: no products found — store selection may have failed")
-	} else {
-		slog.Info("eroski: scrape complete", slog.Int("products", len(products)))
-	}
 	return products, nil
 }
 
-func scrapeEroskiCategory(ctx context.Context, browser *rod.Browser, catName, url string) ([]RawProduct, error) {
-	page, err := browser.Page(proto.TargetCreateTarget{URL: url})
-	if err != nil {
-		return nil, fmt.Errorf("open page: %w", err)
-	}
-	defer func() { _ = page.Close() }()
-
-	page = page.Context(ctx)
-	if err := page.WaitLoad(); err != nil {
-		slog.Warn("eroski: WaitLoad failed", slog.String("url", url))
-	}
-	time.Sleep(3 * time.Second)
-
-	selectors := []string{
-		".product-item",
-		".product-card",
-		"[data-testid='product']",
-		"article.product",
-		"li.product",
-		".product",
+func extractEroskiProducts(html, category string, seen map[string]bool) []RawProduct {
+	// Extract name+price pairs from GA4 encoded data.
+	matches := eroskiPriceRe.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return nil
 	}
 
-	var els rod.Elements
-	for _, sel := range selectors {
-		els, _ = page.Elements(sel)
-		if len(els) > 0 {
-			break
-		}
-	}
+	// Extract product IDs and URLs in order.
+	urlMatches := eroskiProductRe.FindAllStringSubmatch(html, -1)
 
-	if len(els) == 0 {
-		return nil, fmt.Errorf("no products on %s", url)
-	}
+	// Extract image IDs in order.
+	imgMatches := eroskiImageRe.FindAllStringSubmatch(html, -1)
 
 	var products []RawProduct
-	for _, el := range els {
-		p := extractEroskiProduct(el, catName)
-		if p.Name == "" {
+	for i, m := range matches {
+		name := strings.TrimSpace(m[1])
+		priceStr := m[2]
+		price, err := strconv.ParseFloat(priceStr, 64)
+		if err != nil || name == "" || price == 0 {
 			continue
 		}
-		products = append(products, p)
+
+		pid := ""
+		productURL := ""
+		if i < len(urlMatches) {
+			pid = urlMatches[i][1]
+			slug := urlMatches[i][2]
+			productURL = fmt.Sprintf("%s/es/productdetail/%s-%s/", eroskiBase, pid, slug)
+		}
+
+		if pid != "" && seen[pid] {
+			continue
+		}
+		if pid != "" {
+			seen[pid] = true
+		}
+
+		imgURL := ""
+		if i < len(imgMatches) {
+			imgURL = fmt.Sprintf("https://supermercado.eroski.es//images/%s_x.jpg", imgMatches[i][1])
+		}
+
+		products = append(products, RawProduct{
+			ExternalID:   pid,
+			Name:         name,
+			Price:        price,
+			Category:     category,
+			ImageURL:     imgURL,
+			ProductURL:   productURL,
+			Unit:         "unidad",
+			UnitQuantity: 1,
+		})
 	}
-	return products, nil
+	return products
 }
 
-func extractEroskiProduct(el *rod.Element, catName string) RawProduct {
-	var p RawProduct
-	p.Category = catName
+func (s *EroskiScraper) fetchHTML(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Cookie", eroskiCookies)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 
-	nameSelectors := []string{".product-item__description-name", ".product-name", "h3", "h2", ".name"}
-	for _, sel := range nameSelectors {
-		if nameEl, err := el.Element(sel); err == nil {
-			if t, err := nameEl.Text(); err == nil && t != "" {
-				p.Name = strings.TrimSpace(t)
-				break
-			}
-		}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	priceSelectors := []string{".product-item__price", ".price", ".product-price", "[class*='price']"}
-	for _, sel := range priceSelectors {
-		if priceEl, err := el.Element(sel); err == nil {
-			if t, err := priceEl.Text(); err == nil && t != "" {
-				p.Price = parseEroskiPrice(t)
-				break
-			}
-		}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
 	}
-
-	if imgEl, err := el.Element("img"); err == nil {
-		if src, err := imgEl.Attribute("src"); err == nil && src != nil {
-			p.ImageURL = *src
-		}
-	}
-
-	if aEl, err := el.Element("a"); err == nil {
-		if href, err := aEl.Attribute("href"); err == nil && href != nil {
-			if strings.HasPrefix(*href, "http") {
-				p.ProductURL = *href
-			} else {
-				p.ProductURL = eroskiBase + *href
-			}
-		}
-	}
-
-	p.Unit = "unidad"
-	p.UnitQuantity = 1
-	return p
-}
-
-func parseEroskiPrice(s string) float64 {
-	s = strings.ReplaceAll(s, "€", "")
-	s = strings.ReplaceAll(s, " ", "")
-	s = strings.ReplaceAll(s, ",", ".")
-	s = strings.TrimSpace(s)
-	v, _ := strconv.ParseFloat(s, 64)
-	return v
+	return string(body), nil
 }

@@ -4,30 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"time"
-
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
-// MercadonaScraper uses go-rod to:
-//  1. Navigate to www.mercadona.es and select postal code 28001.
-//  2. Intercept the /api/categories/ XHR to get category IDs.
-//  3. Fetch /api/categories/{id}/?postal_code=28001 for each category.
+// MercadonaScraper fetches products from the tienda.mercadona.es JSON REST API.
+// No browser required — the API is publicly accessible without authentication.
 
 type MercadonaScraper struct {
 	postalCode string
-	userAgent  string
+	client     *http.Client
 }
 
-func NewMercadonaScraper(postalCode, userAgent string) *MercadonaScraper {
-	return &MercadonaScraper{postalCode: postalCode, userAgent: userAgent}
+func NewMercadonaScraper(postalCode, _ string) *MercadonaScraper {
+	return &MercadonaScraper{
+		postalCode: postalCode,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
 }
 
 func (s *MercadonaScraper) Name() string { return "mercadona" }
 
+// API response types.
+
 type mercadonaCategoriesResp struct {
+	Count   int `json:"count"`
 	Results []struct {
 		ID         int    `json:"id"`
 		Name       string `json:"name"`
@@ -38,7 +43,7 @@ type mercadonaCategoriesResp struct {
 	} `json:"results"`
 }
 
-type mercadonaCategoryResp struct {
+type mercadonaSubcatResp struct {
 	Categories []struct {
 		ID       int    `json:"id"`
 		Name     string `json:"name"`
@@ -51,136 +56,110 @@ type mercadonaCategoryResp struct {
 			} `json:"photos"`
 			PriceInstructions struct {
 				UnitPrice    float64 `json:"unit_price"`
-				BulkPrice    float64 `json:"bulk_price"`
 				SizeFormat   string  `json:"size_format"`
-				NetWeight    string  `json:"net_weight"`
 				UnitSize     float64 `json:"unit_size"`
 				PricePerUnit float64 `json:"price_per_unit"`
 			} `json:"price_instructions"`
-			Brand    string `json:"brand"`
-			Category string `json:"category"`
+			Brand string `json:"brand"`
 		} `json:"products"`
 	} `json:"categories"`
 }
 
 func (s *MercadonaScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
-	browser := getBrowser()
+	slog.Info("mercadona: starting scrape", slog.String("postal_code", s.postalCode))
 
-	// Step 1: navigate to site and select postal code to get session cookies.
-	page, err := browser.Page(proto.TargetCreateTarget{URL: "https://www.mercadona.es/"})
-	if err != nil {
-		return nil, fmt.Errorf("mercadona: open home page: %w", err)
-	}
-	defer func() { _ = page.Close() }()
-
-	page = page.Context(ctx)
-
-	// Wait for the postal code input to appear and fill it.
-	if err := page.WaitLoad(); err != nil {
-		slog.Warn("mercadona: WaitLoad failed, continuing", slog.String("error", err.Error()))
-	}
-
-	// Try to find and fill the postal code selector modal.
-	_ = rod.Try(func() {
-		el := page.MustElement(`input[placeholder*="postal"], input[name*="postal"], input[id*="postal"], input[placeholder*="código"]`)
-		el.MustInput(s.postalCode)
-		el.MustType('\r')
-	})
-
-	// Wait a bit for the session to establish.
-	time.Sleep(3 * time.Second)
-
-	// Step 2: get categories via API using session cookies from the browser.
-	// Use rod's fetch interception approach: navigate to the API URL.
-	apiPage, err := browser.Page(proto.TargetCreateTarget{
-		URL: fmt.Sprintf("https://www.mercadona.es/api/categories/?postal_code=%s", s.postalCode),
-	})
-	if err != nil {
-		slog.Warn("mercadona: failed to open categories API page", slog.String("error", err.Error()))
-		return nil, nil
-	}
-	defer func() { _ = apiPage.Close() }()
-
-	apiPage = apiPage.Context(ctx)
-	if err := apiPage.WaitLoad(); err != nil {
-		slog.Warn("mercadona: categories API WaitLoad failed", slog.String("error", err.Error()))
-	}
-
-	bodyText, err := apiPage.MustElement("body").Text()
-	if err != nil {
-		slog.Warn("mercadona: failed to get categories response body", slog.String("error", err.Error()))
-		return nil, nil
-	}
-
+	// Step 1: fetch top-level categories.
+	catURL := fmt.Sprintf("https://tienda.mercadona.es/api/categories/?postal_code=%s", s.postalCode)
 	var catResp mercadonaCategoriesResp
-	if err := json.Unmarshal([]byte(bodyText), &catResp); err != nil {
-		slog.Warn("mercadona: failed to parse categories JSON", slog.String("error", err.Error()))
-		return nil, nil
+	if err := s.getJSON(ctx, catURL, &catResp); err != nil {
+		return nil, fmt.Errorf("mercadona: categories: %w", err)
 	}
+	slog.Info("mercadona: categories fetched", slog.Int("top_level", catResp.Count))
 
 	var products []RawProduct
 
-	// Step 3: iterate each top-level category.
+	// Step 2: for each top-level category, fetch each subcategory.
 	for _, top := range catResp.Results {
-		select {
-		case <-ctx.Done():
-			return products, nil
-		default:
+		if ctx.Err() != nil {
+			break
 		}
+		for _, sub := range top.Categories {
+			if ctx.Err() != nil {
+				break
+			}
 
-		catURL := fmt.Sprintf("https://www.mercadona.es/api/categories/%d/?postal_code=%s", top.ID, s.postalCode)
-		catPage, err := browser.Page(proto.TargetCreateTarget{URL: catURL})
-		if err != nil {
-			slog.Warn("mercadona: failed to open category page", slog.String("id", fmt.Sprint(top.ID)), slog.String("error", err.Error()))
-			continue
-		}
+			subcatURL := fmt.Sprintf("https://tienda.mercadona.es/api/categories/%d/?postal_code=%s", sub.ID, s.postalCode)
+			var subcatResp mercadonaSubcatResp
+			if err := s.getJSON(ctx, subcatURL, &subcatResp); err != nil {
+				slog.Warn("mercadona: subcat failed", slog.Int("id", sub.ID), slog.String("error", err.Error()))
+				continue
+			}
 
-		catPage = catPage.Context(ctx)
-		if err := catPage.WaitLoad(); err != nil {
-			_ = catPage.Close()
-			continue
-		}
+			for _, group := range subcatResp.Categories {
+				for _, p := range group.Products {
+					pi := p.PriceInstructions
+					unit, qty := ParseUnit(pi.SizeFormat)
+					if qty == 0 {
+						qty = pi.UnitSize
+					}
+					if qty == 0 {
+						qty = 1
+					}
 
-		body, err := catPage.MustElement("body").Text()
-		_ = catPage.Close()
-		if err != nil {
-			continue
-		}
+					imgURL := ""
+					if len(p.Photos) > 0 {
+						imgURL = p.Photos[0].Regular
+					}
 
-		var detail mercadonaCategoryResp
-		if err := json.Unmarshal([]byte(body), &detail); err != nil {
-			slog.Warn("mercadona: failed to parse category detail", slog.String("name", top.Name), slog.String("error", err.Error()))
-			continue
-		}
-
-		for _, sub := range detail.Categories {
-			for _, p := range sub.Products {
-				unit, qty := ParseUnit(p.PriceInstructions.SizeFormat)
-				if qty == 0 {
-					qty = p.PriceInstructions.UnitSize
+					products = append(products, RawProduct{
+						ExternalID:   p.ID,
+						Name:         p.DisplayName,
+						Brand:        p.Brand,
+						Price:        pi.UnitPrice,
+						PricePerUnit: pi.PricePerUnit,
+						Unit:         unit,
+						UnitQuantity: qty,
+						Category:     top.Name + " > " + sub.Name,
+						ImageURL:     imgURL,
+						ProductURL:   fmt.Sprintf("https://tienda.mercadona.es/producto/%s/%s/", p.Slug, p.ID),
+					})
 				}
+			}
 
-				imgURL := ""
-				if len(p.Photos) > 0 {
-					imgURL = p.Photos[0].Regular
-				}
-
-				products = append(products, RawProduct{
-					ExternalID:   p.ID,
-					Name:         p.DisplayName,
-					Brand:        p.Brand,
-					Price:        p.PriceInstructions.UnitPrice,
-					PricePerUnit: p.PriceInstructions.PricePerUnit,
-					Unit:         unit,
-					UnitQuantity: qty,
-					Category:     top.Name + " > " + sub.Name,
-					ImageURL:     imgURL,
-					ProductURL:   fmt.Sprintf("https://www.mercadona.es/producto/%s/%s/", p.Slug, p.ID),
-				})
+			// Brief pause to avoid hammering the API.
+			select {
+			case <-ctx.Done():
+				goto done
+			case <-time.After(150 * time.Millisecond):
 			}
 		}
 	}
 
+done:
 	slog.Info("mercadona: scrape complete", slog.Int("products", len(products)))
 	return products, nil
+}
+
+func (s *MercadonaScraper) getJSON(ctx context.Context, url string, dst any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, dst)
 }

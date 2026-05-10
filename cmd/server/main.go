@@ -147,9 +147,16 @@ func main() {
 				}
 				name := c.Param("name")
 				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							slog.Error("scraper: panic recovered", slog.Any("panic", r))
+						}
+					}()
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 					defer cancel()
-					_ = scheduler.RunOne(ctx, name)
+					if err := scheduler.RunOne(ctx, name); err != nil {
+						slog.Error("scraper: run failed", slog.String("scraper", name), slog.String("error", err.Error()))
+					}
 				}()
 				c.JSON(http.StatusAccepted, gin.H{"message": "scrape triggered", "scraper": name})
 			})

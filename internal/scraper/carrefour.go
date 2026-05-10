@@ -96,7 +96,7 @@ func (s *CarrefourScraper) scrapeCategory(ctx context.Context, slug, catName str
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("carrefour category %s: status %d", slug, resp.StatusCode)

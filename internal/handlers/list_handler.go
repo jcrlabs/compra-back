@@ -385,7 +385,7 @@ func (h *ListHandler) StreamEvents(c *gin.Context) {
 	defer unsubscribe()
 
 	// Send initial ping
-	fmt.Fprintf(c.Writer, "data: {\"type\":\"connected\",\"list_id\":\"%s\"}\n\n", listID)
+	_, _ = fmt.Fprintf(c.Writer, "data: {\"type\":\"connected\",\"list_id\":\"%s\"}\n\n", listID)
 	c.Writer.Flush()
 
 	notify := c.Request.Context().Done()

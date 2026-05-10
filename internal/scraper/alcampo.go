@@ -97,7 +97,7 @@ func (s *AlcampoScraper) scrapeCategory(ctx context.Context, catID, catName stri
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("alcampo category %s: status %d", catID, resp.StatusCode)

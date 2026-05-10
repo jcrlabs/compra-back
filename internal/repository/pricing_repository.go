@@ -100,7 +100,6 @@ func (r *PricingRepository) GetBestPrices(productIDs []uuid.UUID, supers []model
 		for i, s := range supers {
 			sPlaceholders[i] = fmt.Sprintf("$%d", len(args)+1)
 			args = append(args, string(s))
-			i++
 		}
 		superFilter = fmt.Sprintf(" AND supermarket IN (%s)", strings.Join(sPlaceholders, ","))
 	}

@@ -7,8 +7,23 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
+
+// flexFloat accepts both JSON number and string for price fields.
+type flexFloat float64
+
+func (f *flexFloat) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return err
+	}
+	*f = flexFloat(v)
+	return nil
+}
 
 // MercadonaScraper fetches products from the tienda.mercadona.es JSON REST API.
 // No browser required — the API is publicly accessible without authentication.
@@ -55,10 +70,10 @@ type mercadonaSubcatResp struct {
 				Regular string `json:"regular"`
 			} `json:"photos"`
 			PriceInstructions struct {
-				UnitPrice    float64 `json:"unit_price"`
-				SizeFormat   string  `json:"size_format"`
-				UnitSize     float64 `json:"unit_size"`
-				PricePerUnit float64 `json:"price_per_unit"`
+				UnitPrice    flexFloat `json:"unit_price"`
+				SizeFormat   string    `json:"size_format"`
+				UnitSize     flexFloat `json:"unit_size"`
+				PricePerUnit flexFloat `json:"price_per_unit"`
 			} `json:"price_instructions"`
 			Brand string `json:"brand"`
 		} `json:"products"`
@@ -100,7 +115,7 @@ func (s *MercadonaScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 					pi := p.PriceInstructions
 					unit, qty := ParseUnit(pi.SizeFormat)
 					if qty == 0 {
-						qty = pi.UnitSize
+						qty = float64(pi.UnitSize)
 					}
 					if qty == 0 {
 						qty = 1
@@ -115,8 +130,8 @@ func (s *MercadonaScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 						ExternalID:   p.ID,
 						Name:         p.DisplayName,
 						Brand:        p.Brand,
-						Price:        pi.UnitPrice,
-						PricePerUnit: pi.PricePerUnit,
+						Price:        float64(pi.UnitPrice),
+						PricePerUnit: float64(pi.PricePerUnit),
 						Unit:         unit,
 						UnitQuantity: qty,
 						Category:     top.Name + " > " + sub.Name,

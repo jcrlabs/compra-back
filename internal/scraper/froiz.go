@@ -80,7 +80,7 @@ func (s *FroizScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 		priceStr = strings.ReplaceAll(priceStr, "€", "")
 		priceStr = strings.ReplaceAll(priceStr, ",", ".")
 		priceStr = strings.TrimSpace(priceStr)
-		fmt.Sscanf(priceStr, "%f", &price)
+		_, _ = fmt.Sscanf(priceStr, "%f", &price)
 
 		if price == 0 {
 			return

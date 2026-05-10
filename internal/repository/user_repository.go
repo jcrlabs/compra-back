@@ -91,7 +91,7 @@ func (r *UserRepository) SetSupermarketPrefs(userID uuid.UUID, prefs map[models.
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `DELETE FROM user_supermarket_prefs WHERE user_id=$1`, userID)
 	if err != nil {

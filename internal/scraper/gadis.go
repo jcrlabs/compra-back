@@ -79,7 +79,7 @@ func (s *GadisScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 		priceStr = strings.TrimSpace(priceStr)
 
 		var price float64
-		fmt.Sscanf(priceStr, "%f", &price)
+		_, _ = fmt.Sscanf(priceStr, "%f", &price)
 		if price == 0 {
 			return
 		}

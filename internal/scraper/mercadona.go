@@ -94,7 +94,7 @@ func (s *MercadonaScraper) fetchCategories(ctx context.Context) ([]mercadonaCate
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d from categories endpoint", resp.StatusCode)
@@ -141,7 +141,7 @@ func (s *MercadonaScraper) fetchCategory(ctx context.Context, catID int, catName
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("mercadona category %d: status %d", catID, resp.StatusCode)
@@ -156,7 +156,7 @@ func (s *MercadonaScraper) fetchCategory(ctx context.Context, catID int, catName
 	var products []RawProduct
 	for _, p := range data.Results {
 		var price float64
-		fmt.Sscanf(p.PriceInstructions.UnitPrice, "%f", &price)
+		_, _ = fmt.Sscanf(p.PriceInstructions.UnitPrice, "%f", &price)
 
 		unit, qty := ParseUnit(p.PackagingType)
 		products = append(products, RawProduct{

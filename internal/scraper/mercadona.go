@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -39,7 +40,7 @@ func (s *MercadonaScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	for _, cat := range categories {
 		catProducts, err := s.fetchCategory(ctx, cat.ID, cat.Name)
 		if err != nil {
-			// Log and continue — partial data is better than nothing
+			slog.Warn("mercadona: skip category", slog.Int("id", cat.ID), slog.String("name", cat.Name), slog.String("error", err.Error()))
 			continue
 		}
 		products = append(products, catProducts...)
@@ -69,20 +70,35 @@ type mercadonaCategoryResponse struct {
 	} `json:"results"`
 }
 
+func (s *MercadonaScraper) setHeaders(req *http.Request) {
+	ua := s.userAgent
+	if ua == "" || ua == "Mozilla/5.0 (compatible; jcrlabs-bot/1.0)" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "es-ES,es;q=0.9")
+	req.Header.Set("Referer", "https://tiendas.mercadona.es/")
+	req.Header.Set("Origin", "https://tiendas.mercadona.es")
+}
+
 func (s *MercadonaScraper) fetchCategories(ctx context.Context) ([]mercadonaCategory, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://tiendas.mercadona.es/api/categories/", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgent)
-	req.Header.Set("Accept", "application/json")
+	s.setHeaders(req)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d from categories endpoint", resp.StatusCode)
+	}
 
 	var data mercadonaCategoryResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
@@ -119,8 +135,7 @@ func (s *MercadonaScraper) fetchCategory(ctx context.Context, catID int, catName
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgent)
-	req.Header.Set("Accept", "application/json")
+	s.setHeaders(req)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -128,10 +143,15 @@ func (s *MercadonaScraper) fetchCategory(ctx context.Context, catID int, catName
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mercadona category %d: status %d", catID, resp.StatusCode)
+	}
+
 	var data mercadonaProductResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("mercadona category %d: decode: %w", catID, err)
 	}
+	slog.Debug("mercadona: fetched category", slog.Int("id", catID), slog.String("name", catName), slog.Int("products", len(data.Results)))
 
 	var products []RawProduct
 	for _, p := range data.Results {

@@ -15,10 +15,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /bin/server ./cmd/server
 
-FROM alpine:3.21
+FROM debian:bookworm-slim
 
-RUN --mount=type=cache,target=/var/cache/apk \
-    apk add --no-cache ca-certificates tzdata
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    chromium \
+    fonts-liberation \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /bin/server /bin/server
 

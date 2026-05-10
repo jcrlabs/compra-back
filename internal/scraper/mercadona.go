@@ -66,9 +66,7 @@ type mercadonaSubcatResp struct {
 			ID          string `json:"id"`
 			Slug        string `json:"slug"`
 			DisplayName string `json:"display_name"`
-			Photos      []struct {
-				Regular string `json:"regular"`
-			} `json:"photos"`
+			Thumbnail   string `json:"thumbnail"`
 			PriceInstructions struct {
 				UnitPrice    flexFloat `json:"unit_price"`
 				SizeFormat   string    `json:"size_format"`
@@ -121,10 +119,7 @@ func (s *MercadonaScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 						qty = 1
 					}
 
-					imgURL := ""
-					if len(p.Photos) > 0 {
-						imgURL = p.Photos[0].Regular
-					}
+					imgURL := p.Thumbnail
 
 					products = append(products, RawProduct{
 						ExternalID:   p.ID,

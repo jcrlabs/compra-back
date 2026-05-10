@@ -116,10 +116,10 @@ func (s *MercadonaScraper) fetchCategories(ctx context.Context) ([]mercadonaCate
 
 type mercadonaProductResponse struct {
 	Results []struct {
-		ID          string `json:"id"`
-		DisplayName string `json:"display_name"`
-		Brand       string `json:"brand"`
-		Thumbnail   string `json:"thumbnail"`
+		ID                string `json:"id"`
+		DisplayName       string `json:"display_name"`
+		Brand             string `json:"brand"`
+		Thumbnail         string `json:"thumbnail"`
 		PriceInstructions struct {
 			UnitPrice       string `json:"unit_price"`
 			ReferencePrice  string `json:"reference_price"`

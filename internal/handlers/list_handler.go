@@ -34,6 +34,9 @@ func (h *ListHandler) GetLists(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get lists"})
 		return
 	}
+	if lists == nil {
+		lists = []models.ShoppingList{}
+	}
 	c.JSON(http.StatusOK, lists)
 }
 

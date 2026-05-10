@@ -39,7 +39,7 @@ config:
   dbSslMode: disable
   corsAllowedOrigins: "https://compra.jcrlabs.net"
   scraperCron: "0 3 * * *"
-  mercadonaPostalCode: "28001"
+  mercadonaPostalCode: "36205"
 
 secretName: compra-back-secrets
 

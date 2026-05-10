@@ -76,8 +76,9 @@ var eroskiSearchTerms = []struct {
 
 var (
 	eroskiProductRe = regexp.MustCompile(`/productdetail/(\d+)-([^/"]+)/`)
-	eroskiPriceRe   = regexp.MustCompile(`item_name&quot;:&quot;([^&]+)&quot;[^}]*?price&quot;:(\d+(?:\.\d+)?)`)
-	eroskiImageRe   = regexp.MustCompile(`data-big-images="\[https://supermercado\.eroski\.es//images/(\d+)_[^"]+\.jpg`)
+	// price appears before item_name in data-metrics JSON (HTML-encoded)
+	eroskiPriceRe = regexp.MustCompile(`&quot;price&quot;:(\d+(?:\.\d+)?)[^}]*?&quot;item_name&quot;:&quot;([^&]+)&quot;`)
+	eroskiImageRe = regexp.MustCompile(`supermercado\.eroski\.es//images/(\d+)\.jpg`)
 )
 
 func (s *EroskiScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
@@ -161,8 +162,9 @@ func extractEroskiProducts(html, category string, seen map[string]bool) []RawPro
 
 	var products []RawProduct
 	for i, m := range matches {
-		name := strings.TrimSpace(m[1])
-		priceStr := m[2]
+		// group 1 = price, group 2 = name (new GA4 format: price before item_name)
+		priceStr := m[1]
+		name := strings.TrimSpace(m[2])
 		price, err := strconv.ParseFloat(priceStr, 64)
 		if err != nil || name == "" || price == 0 {
 			continue
@@ -209,6 +211,7 @@ func (s *EroskiScraper) fetchHTML(ctx context.Context, url string) (string, erro
 	}
 	req.Header.Set("Cookie", eroskiCookies)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
 	resp, err := s.client.Do(req)
 	if err != nil {

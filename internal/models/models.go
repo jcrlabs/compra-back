@@ -53,16 +53,18 @@ type Category struct {
 // Product
 
 type Product struct {
-	ID           uuid.UUID  `json:"id"`
-	Name         string     `json:"name"`
-	Brand        string     `json:"brand,omitempty"`
-	CategoryID   *uuid.UUID `json:"category_id,omitempty"`
-	Category     *Category  `json:"category,omitempty"`
-	Unit         string     `json:"unit"`
-	UnitQuantity float64    `json:"unit_quantity"`
-	ImageURL     string     `json:"image_url,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	Name          string     `json:"name"`
+	Brand         string     `json:"brand,omitempty"`
+	CategoryID    *uuid.UUID `json:"category_id,omitempty"`
+	Category      *Category  `json:"category,omitempty"`
+	Unit          string     `json:"unit"`
+	UnitQuantity  float64    `json:"unit_quantity"`
+	ImageURL      string     `json:"image_url,omitempty"`
+	MinPrice      *float64   `json:"min_price,omitempty"`
+	CheapestSuper string     `json:"cheapest_super,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // Price

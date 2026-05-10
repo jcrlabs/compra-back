@@ -112,8 +112,16 @@ func (r *CatalogRepository) ListProducts(f ProductFilter) (*ProductPage, error) 
 	rows, err := r.db.Query(context.Background(),
 		fmt.Sprintf(`
 			SELECT p.id, p.name, COALESCE(p.brand,''), p.category_id,
-			       p.unit, p.unit_quantity, COALESCE(p.image_url,''), p.created_at, p.updated_at
+			       p.unit, p.unit_quantity, COALESCE(p.image_url,''), p.created_at, p.updated_at,
+			       mp.price, mp.supermarket
 			FROM products p
+			LEFT JOIN LATERAL (
+			    SELECT price, supermarket
+			    FROM current_prices cp
+			    WHERE cp.product_id = p.id
+			    ORDER BY price ASC
+			    LIMIT 1
+			) mp ON true
 			WHERE %s
 			ORDER BY p.name
 			LIMIT $%d OFFSET $%d
@@ -128,9 +136,16 @@ func (r *CatalogRepository) ListProducts(f ProductFilter) (*ProductPage, error) 
 	var products []models.Product
 	for rows.Next() {
 		var p models.Product
+		var minPrice *float64
+		var cheapestSuper *string
 		if err := rows.Scan(&p.ID, &p.Name, &p.Brand, &p.CategoryID,
-			&p.Unit, &p.UnitQuantity, &p.ImageURL, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.Unit, &p.UnitQuantity, &p.ImageURL, &p.CreatedAt, &p.UpdatedAt,
+			&minPrice, &cheapestSuper); err != nil {
 			return nil, err
+		}
+		p.MinPrice = minPrice
+		if cheapestSuper != nil {
+			p.CheapestSuper = *cheapestSuper
 		}
 		products = append(products, p)
 	}

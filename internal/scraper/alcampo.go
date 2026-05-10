@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -55,11 +56,23 @@ type alcampoResponse struct {
 	} `json:"data"`
 }
 
+func (s *AlcampoScraper) setHeaders(req *http.Request) {
+	ua := s.userAgent
+	if ua == "" || ua == "Mozilla/5.0 (compatible; jcrlabs-bot/1.0)" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "es-ES,es;q=0.9")
+	req.Header.Set("Referer", "https://www.alcampo.es/")
+}
+
 func (s *AlcampoScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	var all []RawProduct
 	for _, cat := range alcampoCategories {
 		prods, err := s.scrapeCategory(ctx, cat.ID, cat.Name)
 		if err != nil {
+			slog.Warn("alcampo: skip category", slog.String("id", cat.ID), slog.String("error", err.Error()))
 			continue
 		}
 		all = append(all, prods...)
@@ -78,8 +91,7 @@ func (s *AlcampoScraper) scrapeCategory(ctx context.Context, catID, catName stri
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgent)
-	req.Header.Set("Accept", "application/json")
+	s.setHeaders(req)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -87,10 +99,15 @@ func (s *AlcampoScraper) scrapeCategory(ctx context.Context, catID, catName stri
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("alcampo category %s: status %d", catID, resp.StatusCode)
+	}
+
 	var data alcampoResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("alcampo category %s: decode: %w", catID, err)
 	}
+	slog.Debug("alcampo: fetched category", slog.String("id", catID), slog.Int("products", len(data.Data.Products)))
 
 	var products []RawProduct
 	for _, p := range data.Data.Products {

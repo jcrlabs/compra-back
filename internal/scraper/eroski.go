@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -38,8 +39,12 @@ var eroskiCategoryURLs = []struct {
 func (s *EroskiScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	var products []RawProduct
 
+	ua := s.userAgent
+	if ua == "" || ua == "Mozilla/5.0 (compatible; jcrlabs-bot/1.0)" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	}
 	c := colly.NewCollector(
-		colly.UserAgent(s.userAgent),
+		colly.UserAgent(ua),
 		colly.MaxDepth(1),
 	)
 	c.SetRequestTimeout(30 * time.Second)
@@ -47,6 +52,14 @@ func (s *EroskiScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 		DomainGlob:  "*eroski.es*",
 		Delay:       700 * time.Millisecond,
 		RandomDelay: 300 * time.Millisecond,
+	})
+	c.OnResponse(func(r *colly.Response) {
+		if r.StatusCode != 200 {
+			slog.Warn("eroski: unexpected status", slog.String("url", r.Request.URL.String()), slog.Int("status", r.StatusCode))
+		}
+	})
+	c.OnError(func(r *colly.Response, err error) {
+		slog.Warn("eroski: request error", slog.String("url", r.Request.URL.String()), slog.String("error", err.Error()))
 	})
 
 	var currentCat string

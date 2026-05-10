@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -41,12 +42,24 @@ var carrefourCategories = map[string]string{
 	"cafe-desayuno":     "Café y desayuno",
 }
 
+func (s *CarrefourScraper) setHeaders(req *http.Request) {
+	ua := s.userAgent
+	if ua == "" || ua == "Mozilla/5.0 (compatible; jcrlabs-bot/1.0)" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "es-ES,es;q=0.9")
+	req.Header.Set("Referer", "https://www.carrefour.es/")
+}
+
 func (s *CarrefourScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	var all []RawProduct
 	for slug, name := range carrefourCategories {
 		products, err := s.scrapeCategory(ctx, slug, name)
 		if err != nil {
-			continue // partial — keep going
+			slog.Warn("carrefour: skip category", slog.String("slug", slug), slog.String("error", err.Error()))
+			continue
 		}
 		all = append(all, products...)
 		select {
@@ -76,8 +89,7 @@ func (s *CarrefourScraper) scrapeCategory(ctx context.Context, slug, catName str
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.userAgent)
-	req.Header.Set("Accept", "application/json")
+	s.setHeaders(req)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
 	resp, err := s.client.Do(req)
@@ -86,10 +98,15 @@ func (s *CarrefourScraper) scrapeCategory(ctx context.Context, slug, catName str
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("carrefour category %s: status %d", slug, resp.StatusCode)
+	}
+
 	var data carrefourSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("carrefour category %s: decode: %w", slug, err)
 	}
+	slog.Debug("carrefour: fetched category", slog.String("slug", slug), slog.Int("products", len(data.Products)))
 
 	var products []RawProduct
 	for _, p := range data.Products {

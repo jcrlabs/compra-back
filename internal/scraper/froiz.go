@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -43,8 +44,12 @@ func (s *FroizScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	var products []RawProduct
 	var scraperErr error
 
+	ua := s.userAgent
+	if ua == "" || ua == "Mozilla/5.0 (compatible; jcrlabs-bot/1.0)" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+	}
 	c := colly.NewCollector(
-		colly.UserAgent(s.userAgent),
+		colly.UserAgent(ua),
 		colly.MaxDepth(1),
 	)
 	c.SetRequestTimeout(30 * time.Second)
@@ -52,6 +57,11 @@ func (s *FroizScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 		DomainGlob:  "*froiz.com*",
 		Delay:       600 * time.Millisecond,
 		RandomDelay: 300 * time.Millisecond,
+	})
+	c.OnResponse(func(r *colly.Response) {
+		if r.StatusCode != 200 {
+			slog.Warn("froiz: unexpected status", slog.String("url", r.Request.URL.String()), slog.Int("status", r.StatusCode))
+		}
 	})
 
 	var currentCat string
@@ -95,6 +105,7 @@ func (s *FroizScraper) Scrape(ctx context.Context) ([]RawProduct, error) {
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
+		slog.Warn("froiz: request error", slog.String("url", r.Request.URL.String()), slog.String("error", err.Error()))
 		scraperErr = err
 	})
 

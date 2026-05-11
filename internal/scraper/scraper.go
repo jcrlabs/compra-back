@@ -78,7 +78,7 @@ func ParseUnit(raw string) (unit string, qty float64) {
 
 func parseQty(s, suffix string) float64 {
 	idx := strings.Index(s, suffix)
-	if idx == 0 {
+	if idx <= 0 {
 		return 0
 	}
 	numStr := strings.TrimSpace(s[:idx])

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"strconv"
 	"strings"
 	"time"
@@ -24,9 +25,10 @@ type AlcampoScraper struct {
 }
 
 func NewAlcampoScraper(userAgent string) *AlcampoScraper {
+	jar, _ := cookiejar.New(nil)
 	return &AlcampoScraper{
 		userAgent: userAgent,
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    &http.Client{Timeout: 30 * time.Second, Jar: jar},
 	}
 }
 
